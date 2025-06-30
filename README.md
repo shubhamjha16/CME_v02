@@ -38,3 +38,14 @@ It displays a live rating notification inside your editor and stores prompt hist
 ---
 
 
+## 🗺 Project Roadmap
+
+Phase	Description	Status
+- ✅ Phase 1	Flask backend + Gemini scoring	Done
+- ✅ Phase 2	VS Code Extension setup	Done
+- ✅ Phase 3	Integrated flow testing	Done 
+- ⏳ Phase 4	Retry logic + accepted suggestions tracking	(Pending)
+- ⏳ Phase 5	Dashboard (Streamlit/React) for analytics	(Pending)
+- ✅ Phase 6	Final polish + docs	Done
+- 🚀 Phase 7	Reinforcement learning based on user behavior	Advanced
+
