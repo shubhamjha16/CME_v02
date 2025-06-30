@@ -11,117 +11,258 @@
 
 ## 🚀 Overview
 
-Copilot Monitor is a developer tool that **captures code suggestions inside VS Code**, sends them to a **Gemini-powered AI model** for evaluation, and logs results in **Supabase**. It displays a live rating notification inside your editor and stores prompt history for feedback & training analysis.
+Copilot Monitor is a developer tool that **captures code suggestions inside VS Code**, sends them to a **Gemini-powered AI model** for evaluation, and logs results in **Supabase**.  
+It displays a live rating notification inside your editor and stores prompt history for feedback & analysis.
 
 ---
 
 ## 🧱 Tech Stack
 
-| Layer           | Tech                      |
-|----------------|---------------------------|
-| Frontend       | VS Code Extension (TypeScript) |
-| Backend        | Flask + Gemini API        |
-| Database       | Supabase (PostgreSQL)     |
-| Model          | Gemini 1.5 Flash          |
+| Layer     | Tech                      |
+|-----------|---------------------------|
+| Frontend  | VS Code Extension (TypeScript) |
+| Backend   | Flask + Gemini API        |
+| Database  | Supabase (PostgreSQL)     |
+| Model     | Gemini 1.5 Flash          |
 
 ---
 
 ## ⚙️ Features
 
 - 🧠 AI-based scoring of code completions (1–10 scale)
-- 🔁 Live interaction between VS Code, backend, and Supabase
-- 📬 Pop-up notifications inside VS Code after each rating
-- 📦 Prompt logging and analytics via Supabase
-- 🚨 Error handling and fallback logic (planned)
+- 🔁 Real-time interaction between VS Code, backend, and Supabase
+- 💡 Live popup notifications inside your editor
+- 📦 Prompt logging & analytics via Supabase
+- 🔁 Retry logic & user acceptance tracking (planned)
 
 ---
 
 ## 📦 Installation & Setup
 
-### 1. Clone & Setup Backend
+### 🔧 Backend (Flask + Gemini + Supabase)
 
 ```bash
 git clone https://github.com/your-username/copilot-monitor-backend.git
 cd copilot-monitor-backend
 python -m venv venv
-venv\Scripts\activate  # On Windows
+venv\Scripts\activate   # On Windows
 pip install -r requirements.txt
-Create a .env file:
 
-env
-Copy
-Edit
+Create a .env file in root:
+
 GOOGLE_API_KEY=your-gemini-api-key
-SUPABASE_CME_URL=https://your-project.supabase.co
+SUPABASE_CME_URL=https://yourproject.supabase.co
 SUPABASE_CME_KEY=your-service-role-key
-Start the Flask server:
 
-bash
-Copy
-Edit
+Run the server:
+
 python app.py
-2. VS Code Extension (Frontend)
-bash
-Copy
-Edit
+
+💻 Frontend (VS Code Extension)
+
 cd copilot-monitor
 npm install
 npm run compile
-Then open the folder in VS Code, press F5 to launch a new Extension Development Host.
 
-🔍 How It Works
-Developer types code → VS Code captures prompt/suggestion
+To launch:
 
-Request is sent to Flask API → Gemini scores it
 
-Score is logged to Supabase (with metadata)
 
-Notification appears: 💡 Copilot Monitor Score: 8/10
 
-🛣️ Project Roadmap
-Phase	Description	Status
-✅ Phase 1	Flask + Gemini scoring backend	Complete
-✅ Phase 2	VS Code extension to capture suggestions	Complete
-🔄 Phase 3	Integration Test (extension → backend → Supabase)	In Progress
-🔁 Phase 4	Retry/Error handling + acceptance tracking	Upcoming
-📊 Phase 5	Optional Dashboard (Streamlit / React)	Optional
-✅ Phase 6	Polish + README + Docs	Complete
-🚀 Phase 7	(Advanced) RL fine-tuning from user acceptance feedback	Future
+
+Open this folder in VS Code.
+
+
+
+Press F5 to open an Extension Development Host.
+
+
+
+In the new window, open a file like test.py.
+
+
+
+Start typing something like:
+
+def rev(
+
+It should trigger Copilot → Gemini scores the suggestion → you'll see a VS Code popup:
+💡 Copilot Monitor Score: 9/10
+
+
+
+🔍 Example API Call
+
+curl -X POST http://127.0.0.1:5000/score \
+  -H "Content-Type: application/json" \
+  -d '{"prompt":"def rev(","suggestion":"def rev(s): return s[::-1]","lang":"python","file_path":"test.py"}'
+
+Response:
+
+{
+  "score": 9
+}
+
+
 
 📁 Folder Structure
-bash
-Copy
-Edit
-copilot-monitor-backend/
-├── app.py              # Flask backend
-├── .env                # API keys
-├── requirements.txt
-└── ...
 
-copilot-monitor/        # VS Code Extension
+copilot-monitor-backend/
+├── app.py
+├── .env
+├── requirements.txt
+
+copilot-monitor/
 ├── src/extension.ts
 ├── esbuild.js
 ├── package.json
-└── ...
-💬 Example CURL Test
-bash
-Copy
-Edit
-curl -X POST http://127.0.0.1:5000/score \
-  -H "Content-Type: application/json" \
-  -d '{
-    "prompt": "def rev(",
-    "suggestion": "def rev(s): return s[::-1]",
-    "lang": "python",
-    "file_path": "test.py"
-  }'
-✅ License
-This project is licensed under the MIT License.
-Feel free to fork, modify, or contribute.
 
-🙏 Acknowledgements
-Google Gemini API
 
-Supabase Team
 
-VS Code API & Community
+📊 Roadmap
+
+
+
+
+
+
+
+Phase
+
+
+
+Description
+
+
+
+Status
+
+
+
+
+
+✅
+
+
+
+Phase 1: Flask + Gemini scoring API
+
+
+
+Completed
+
+
+
+
+
+✅
+
+
+
+Phase 2: VS Code extension captures suggestions
+
+
+
+Completed
+
+
+
+
+
+⏳
+
+
+
+Phase 3: Integration Test (extension → backend → Supabase)
+
+
+
+In Progress
+
+
+
+
+
+⏳
+
+
+
+Phase 4: Retry logic, error handling, acceptance tracking
+
+
+
+Upcoming
+
+
+
+
+
+⏳
+
+
+
+Phase 5: Optional dashboard (Streamlit/React)
+
+
+
+Optional
+
+
+
+
+
+✅
+
+
+
+Phase 6: Final polish, cleanup, documentation
+
+
+
+Completed
+
+
+
+
+
+🚀
+
+
+
+Phase 7: Reinforcement learning from user feedback
+
+
+
+Advanced
+
+
+
+🧪 Testing Tips
+
+
+
+
+
+Open a test file (test.py)
+
+
+
+Trigger a suggestion (def rev()
+
+
+
+You should see:
+
+
+
+
+
+🔍 Gemini raw response: I rate this 8 out of 10... (in app.py terminal)
+
+
+
+Popup: 💡 Copilot Monitor Score: 8/10
+
+
+
+Entry logged in Supabase under prompt_log table
