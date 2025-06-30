@@ -37,14 +37,4 @@ It displays a live rating notification inside your editor and stores prompt hist
 
 ---
 
-## 📦 Installation & Setup
-
-### 🔧 Backend (Flask + Gemini + Supabase)
-
-```bash
-git clone https://github.com/your-username/copilot-monitor-backend.git
-cd copilot-monitor-backend
-python -m venv venv
-venv\Scripts\activate   # On Windows
-pip install -r requirements.txt
 
