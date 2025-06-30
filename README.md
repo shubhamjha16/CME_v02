@@ -1,132 +1,127 @@
-**Copilot Monitor
-A VS Code extension + Flask backend system that monitors AI code suggestions (like from GitHub Copilot), rates them using Google Gemini, and logs everything to Supabase for analytics.
+# ⚡ Copilot Monitor
 
-📦 Features
-⚡ Real-Time Prompt Scoring
-VS Code captures the prompt and suggestion, sends it to a local Flask server.
+> Real-time AI-based evaluator for code suggestions using Gemini + Supabase + VS Code Extension
 
-🤖 Google Gemini Evaluation
-Gemini (via the Generative AI API) evaluates the suggestion for accuracy, relevance, and style (1–10 score).
+![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)
+![Made with TypeScript](https://img.shields.io/badge/language-TypeScript-blue)
+![Built with Flask](https://img.shields.io/badge/backend-Flask-red)
+![VS Code Extension](https://img.shields.io/badge/editor-VSCode-purple)
 
-🧾 Supabase Logging
-Prompt, suggestion, language, score, and file path are logged to a Supabase table (prompt_log) for later analysis.
+---
 
-🧠 Optional Feedback Loop
-Accept/reject handling and retry logic (in future phases).
+## 🚀 Overview
 
-🧱 Project Structure
-bash
-Copy
-Edit
-copilot-monitor-backend/
-├── app.py                  # Flask server + Gemini + Supabase logger
-├── .env                    # API keys and URLs
-├── requirements.txt        # Python dependencies
-└── venv/                   # Python virtual environment
+Copilot Monitor is a developer tool that **captures code suggestions inside VS Code**, sends them to a **Gemini-powered AI model** for evaluation, and logs results in **Supabase**. It displays a live rating notification inside your editor and stores prompt history for feedback & training analysis.
 
-copilot-monitor/
-├── src/
-│   └── extension.ts        # Main logic of the VS Code extension
-├── esbuild.js              # Build tool for bundling extension
-├── package.json            # VS Code extension config + dependencies
-└── out/                    # Compiled output
-🔧 Setup Instructions
-1. Backend (Flask + Gemini + Supabase)
-bash
-Copy
-Edit
+---
+
+## 🧱 Tech Stack
+
+| Layer           | Tech                      |
+|----------------|---------------------------|
+| Frontend       | VS Code Extension (TypeScript) |
+| Backend        | Flask + Gemini API        |
+| Database       | Supabase (PostgreSQL)     |
+| Model          | Gemini 1.5 Flash          |
+
+---
+
+## ⚙️ Features
+
+- 🧠 AI-based scoring of code completions (1–10 scale)
+- 🔁 Live interaction between VS Code, backend, and Supabase
+- 📬 Pop-up notifications inside VS Code after each rating
+- 📦 Prompt logging and analytics via Supabase
+- 🚨 Error handling and fallback logic (planned)
+
+---
+
+## 📦 Installation & Setup
+
+### 1. Clone & Setup Backend
+
+```bash
+git clone https://github.com/your-username/copilot-monitor-backend.git
 cd copilot-monitor-backend
 python -m venv venv
-.\venv\Scripts\activate     # For Windows
+venv\Scripts\activate  # On Windows
 pip install -r requirements.txt
 Create a .env file:
 
-ini
+env
 Copy
 Edit
-GOOGLE_API_KEY=your_gemini_key
+GOOGLE_API_KEY=your-gemini-api-key
 SUPABASE_CME_URL=https://your-project.supabase.co
-SUPABASE_CME_KEY=your_supabase_anon_key
-Then run:
+SUPABASE_CME_KEY=your-service-role-key
+Start the Flask server:
 
 bash
 Copy
 Edit
 python app.py
-It should run on:
-➡️ http://127.0.0.1:5000/score
-
-2. Frontend (VS Code Extension)
+2. VS Code Extension (Frontend)
 bash
 Copy
 Edit
 cd copilot-monitor
 npm install
 npm run compile
-Then press F5 in VS Code to open the Extension Development Host.
+Then open the folder in VS Code, press F5 to launch a new Extension Development Host.
 
-🧪 How It Works
-You start typing in a .py, .js, etc. file.
+🔍 How It Works
+Developer types code → VS Code captures prompt/suggestion
 
-AI (e.g., Copilot) gives a suggestion.
+Request is sent to Flask API → Gemini scores it
 
-Extension sends { prompt, suggestion, lang, file_path } to the Flask backend.
+Score is logged to Supabase (with metadata)
 
-Flask uses Gemini to rate it (1–10).
+Notification appears: 💡 Copilot Monitor Score: 8/10
 
-Response is shown in a VS Code popup.
+🛣️ Project Roadmap
+Phase	Description	Status
+✅ Phase 1	Flask + Gemini scoring backend	Complete
+✅ Phase 2	VS Code extension to capture suggestions	Complete
+🔄 Phase 3	Integration Test (extension → backend → Supabase)	In Progress
+🔁 Phase 4	Retry/Error handling + acceptance tracking	Upcoming
+📊 Phase 5	Optional Dashboard (Streamlit / React)	Optional
+✅ Phase 6	Polish + README + Docs	Complete
+🚀 Phase 7	(Advanced) RL fine-tuning from user acceptance feedback	Future
 
-Data is logged to Supabase.
+📁 Folder Structure
+bash
+Copy
+Edit
+copilot-monitor-backend/
+├── app.py              # Flask backend
+├── .env                # API keys
+├── requirements.txt
+└── ...
 
-🛠 Example CURL Test
+copilot-monitor/        # VS Code Extension
+├── src/extension.ts
+├── esbuild.js
+├── package.json
+└── ...
+💬 Example CURL Test
 bash
 Copy
 Edit
 curl -X POST http://127.0.0.1:5000/score \
   -H "Content-Type: application/json" \
-  -d "{\"prompt\":\"def rev(\", \"suggestion\":\"def rev(s): return s[::-1]\", \"lang\":\"python\", \"file_path\":\"test.py\"}"
-Expected response:
+  -d '{
+    "prompt": "def rev(",
+    "suggestion": "def rev(s): return s[::-1]",
+    "lang": "python",
+    "file_path": "test.py"
+  }'
+✅ License
+This project is licensed under the MIT License.
+Feel free to fork, modify, or contribute.
 
-json
-Copy
-Edit
-{ "score": 9 }
-📊 Supabase Table Schema (prompt_log)
-Field	Type
-prompt	text
-suggestion	text
-score	integer
-lang	text
-file_path	text
-accepted	boolean
-created_at	timestamp
+🙏 Acknowledgements
+Google Gemini API
 
-🚦 Roadmap
-✅ AI scoring backend with Gemini
+Supabase Team
 
-✅ VS Code extension + popup
-
-🔄 Live testing and reliability fixes
-
-🔜 Retry logic, error handling
-
-🔜 Dashboard (React/Streamlit)
-
-🔮 Feedback-based model tuning
-
-⚠️ Disclaimer
-This is a local dev project for experimentation. Do not use the development Flask server or store sensitive data in Supabase without securing your keys.
-
-🙌 Credits
-Built using:
-
-Google Generative AI
-
-Supabase
-
-VS Code Extension API
-
-TypeScript
-
-Flask
-
+VS Code API & Community
