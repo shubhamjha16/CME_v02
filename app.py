@@ -23,6 +23,7 @@ def score_prompt(prompt, suggestion):
         response = model.generate_content(
             f"Rate the code suggestion from 1 to 10 for correctness, style, and relevance.\n\nPrompt:\n{prompt}\n\nSuggestion:\n{suggestion}"
         )
+        print("🔍 Gemini raw response:", response.text)
         content = response.text.strip()
         score = int(''.join(filter(str.isdigit, content.split('.')[0])))
         return min(score, 10)
