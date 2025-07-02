@@ -1,0 +1,712 @@
+# Copilot Monitor - Developer Manual
+
+## 1. Introduction and Overall Setup
+
+### 1.1. Project Overview
+
+Welcome to the Copilot Monitor Developer Manual!
+
+Copilot Monitor is a tool designed to help you understand and evaluate the code suggestions provided by GitHub Copilot (or similar AI code assistants). It works by:
+
+1.  **Capturing** the code you type (the "prompt") and the suggestion Copilot offers within your VS Code editor.
+2.  **Sending** this information to a backend server.
+3.  The backend server then **asks Google's Gemini AI** to rate the usefulness of Copilot's suggestion on a scale of 1-10.
+4.  This score, along with the prompt and suggestion, is **stored** in a Supabase database.
+5.  Finally, a **Streamlit dashboard** allows you to view analytics, such as average scores, usage trends, and more.
+
+The main components are:
+
+*   **VS Code Extension (`copilot-monitor` directory):** Runs inside your editor to capture code.
+*   **Flask Backend (`app.py`):** A Python server that handles scoring logic and database interaction.
+*   **Supabase:** A cloud-based database service used to store all the data.
+*   **Streamlit Dashboard (`dashboard.py`):** A Python-based web application to visualize the collected data.
+
+This manual will guide you through understanding each part, how to run them, and how to test them.
+
+### 1.2. Initial Environment Setup
+
+Before you can run any part of Copilot Monitor, you need to set up your development environment.
+
+**Prerequisites:**
+
+*   Python 3.8+ and Pip (Python package installer)
+*   Node.js and npm (for the VS Code extension)
+*   Git (for cloning the repository)
+*   A Supabase account (free tier is sufficient)
+*   A Google AI Studio API Key for Gemini (free tier available)
+
+**Steps:**
+
+1.  **Clone the Repository:**
+    Open your terminal or command prompt and run:
+    ```bash
+    git clone <repository_url>
+    cd <repository_directory_name>
+    ```
+    (Replace `<repository_url>` with the actual URL of the Git repository and `<repository_directory_name>` with the name of the folder created by the clone).
+
+2.  **Create and Configure the `.env` File:**
+    This file stores your secret API keys so the application can access Google Gemini and Supabase.
+    *   In the main project root directory (where `app.py` is located), create a new file named `.env`.
+    *   Add the following lines to this file, replacing the placeholders with your actual keys:
+
+        ```env
+        GOOGLE_API_KEY=your_google_api_key_here
+        SUPABASE_CME_URL=your_supabase_project_url_here
+        SUPABASE_CME_KEY=your_supabase_service_role_key_here
+        ```
+        *   `GOOGLE_API_KEY`: Get this from Google AI Studio (formerly MakerSuite).
+        *   `SUPABASE_CME_URL`: Find this in your Supabase project settings (API -> Project URL).
+        *   `SUPABASE_CME_KEY`: Find this in your Supabase project settings (API -> Project API Keys -> `service_role` secret). **Important:** Use the `service_role` key for backend operations.
+
+3.  **Install Python Dependencies:**
+    These are for the Flask backend (`app.py`) and the Streamlit dashboard (`dashboard.py`).
+    In your terminal, from the project root directory, run:
+    ```bash
+    pip install -r requirements.txt
+    ```
+
+4.  **Install Node.js Dependencies (for the VS Code Extension):**
+    These are needed to build and run the VS Code extension.
+    *   Navigate to the extension's directory:
+        ```bash
+        cd copilot-monitor
+        ```
+    *   Install the dependencies:
+        ```bash
+        npm install
+        ```
+    *   After installation, return to the project root directory if needed:
+        ```bash
+        cd ..
+        ```
+
+Once these steps are completed, you're ready to move on to understanding and running the individual components of the Copilot Monitor.
+---
+
+## 2. Flask Backend (`app.py`)
+
+### 2.1. Purpose
+
+The `app.py` file is the **brain** of the Copilot Monitor system. It's a backend server written in Python using the Flask framework. Its main jobs are:
+
+*   **Listening for incoming data:** It waits for the VS Code extension to send information about code prompts and suggestions.
+*   **Getting suggestions scored:** It takes the suggestion and asks Google's Gemini AI to rate its quality.
+*   **Storing the results:** It saves the prompt, suggestion, score, and other details into your Supabase database.
+
+Think of it as a central hub that coordinates the evaluation process.
+
+### 2.2. Core Logic (Rookie-Friendly Explanation)
+
+Let's break down how `app.py` works:
+
+*   **Flask App Basics:**
+    *   Flask is a lightweight tool for building web applications and APIs (Application Programming Interfaces) in Python.
+    *   `app = Flask(__name__)` creates your web server application.
+    *   `@app.route('/score', methods=['POST'])` defines a specific web address (URL path) `/score` that the server will listen to. The `methods=['POST']` part means it expects to receive data (as opposed to just being asked to send data, which is often a `GET` request).
+
+*   **Environment Variables:**
+    *   `load_dotenv()` and `os.getenv(...)` are used to securely load your API keys from the `.env` file you created. This is much safer than writing keys directly in the code.
+    *   It needs `GOOGLE_API_KEY` for Gemini and `SUPABASE_CME_URL` / `SUPABASE_CME_KEY` for Supabase.
+
+*   **`/score` Endpoint (The Main Entry Point):**
+    *   When the VS Code extension has a prompt and a suggestion, it sends a `POST` request to `http://127.0.0.1:5000/score` (this is the default address for a local Flask app).
+    *   The `score()` function in `app.py` handles this request.
+    *   `data = request.json` gets the data sent by the extension, which includes:
+        *   `prompt`: The code the user typed.
+        *   `suggestion`: The code Copilot suggested.
+        *   `lang`: The programming language (e.g., 'python').
+        *   `file_path`: The file where the suggestion occurred.
+    *   If this data isn't in the expected format, it sends back an error.
+
+*   **`score_prompt(prompt, suggestion)` Function (Getting the AI Score):**
+    *   This function is responsible for talking to Google's Gemini AI.
+    *   `genai.GenerativeModel('gemini-1.5-flash')` sets up the connection to use the 'gemini-1.5-flash' model, which is good for quick tasks.
+    *   It constructs a specific message for Gemini: `"Rate the code suggestion from 1 to 10 for correctness, style, and relevance.\n\nPrompt:\n{prompt}\n\nSuggestion:\n{suggestion}"`. This tells Gemini exactly what to do.
+    *   **Score Parsing:** Gemini will reply with text. The code then tries to find a number in that text to use as the score.
+        *   It first looks for the very first sequence of digits in the response (e.g., if Gemini says "8. Great suggestion!", it grabs the "8").
+        *   If that doesn't work, it has a fallback to find *any* number in the response.
+        *   The score is capped at 10 (so if Gemini says "11", it's treated as 10). If no score can be found, it defaults to 0.
+    *   **Retry Logic:** Sometimes, network requests fail or an API might be temporarily busy.
+        *   The code will try to call the Gemini API up to `MAX_GEMINI_RETRIES` (currently 3) times if there's an error.
+        *   It waits for `GEMINI_RETRY_DELAY_SECONDS` (currently 2 seconds) between retries. This prevents overwhelming the API.
+
+*   **Supabase Logging (Saving the Data):**
+    *   After getting a score from Gemini, the `score()` function then saves everything to your Supabase database.
+    *   `supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)` sets up the connection to your Supabase project.
+    *   It inserts a new record into a table named `prompt_log` with the following information:
+        *   `prompt`: The user's code.
+        *   `suggestion`: Copilot's suggestion.
+        *   `score`: The score from Gemini.
+        *   `lang`: Programming language.
+        *   `file_path`: The file involved.
+        *   `accepted`: A true/false value. It's set to `True` if the `current_score >= 6`, otherwise `False`. This is a simple way to guess if a suggestion was "good enough".
+        *   `created_at`: The current date and time.
+    *   **Retry Logic:** Similar to the Gemini calls, if saving to Supabase fails, it will retry up to `MAX_SUPABASE_RETRIES` (3) times with a `SUPABASE_RETRY_DELAY_SECONDS` (2 seconds) delay.
+
+*   **Returning the Score:**
+    *   Finally, the `/score` endpoint sends a response back to the VS Code extension, containing just the score: `jsonify({'score': current_score})`.
+
+### 2.3. How to Run `app.py`
+
+1.  **Ensure your `.env` file is correctly set up** in the project root directory with your API keys.
+2.  **Make sure you have installed the Python dependencies** (`pip install -r requirements.txt`).
+3.  Open your terminal or command prompt.
+4.  Navigate to the project root directory (where `app.py` is located).
+5.  Run the following command:
+    ```bash
+    python app.py
+    ```
+6.  You should see output similar to this, indicating the server is running:
+    ```
+     * Serving Flask app 'app'
+     * Debug mode: on
+     * Running on http://127.0.0.1:5000 (Press CTRL+C to quit)
+     * Restarting with stat
+     * Debugger is active!
+     * Debugger PIN: ...
+    ```
+    Keep this terminal window open while you use the VS Code extension.
+
+### 2.4. How to Test (Manually)
+
+Directly testing `app.py` by itself (e.g., by opening `http://127.0.0.1:5000/score` in a browser) won't work as intended because it expects a `POST` request with specific JSON data, which browsers typically send as `GET` requests without that data.
+
+The primary way to test `app.py` is indirectly, as part of the whole system:
+
+1.  **Start `app.py`** as described above.
+2.  **Run the VS Code Extension** (see section 3 for instructions).
+3.  **Use Copilot in VS Code** to generate and accept a suggestion.
+4.  **Check the console output of `app.py`:**
+    *   You should see log messages indicating it received a request for `/score`. Example: `[APP] Received request for /score`
+    *   It will print the data it received: `[APP] Request data: {'prompt': '...', 'suggestion': '...', ...}`
+    *   It will show the raw response from Gemini: `🔍 Gemini raw response: ...`
+    *   It will show the calculated score: `[APP] Score calculated: X`
+    *   It will indicate if it's attempting to log to Supabase and whether it was successful: `[APP] Attempting to log to Supabase...`, `[APP] Successfully logged to Supabase.`
+    *   If there are errors (e.g., Gemini API key issue, Supabase connection problem), they will be printed here.
+5.  **Check your Supabase `prompt_log` table:** After a successful interaction, a new row should appear in this table in your Supabase project dashboard.
+
+**Troubleshooting:**
+*   If `app.py` doesn't start, check for Python syntax errors or issues with missing dependencies.
+*   **Port in Use:** If you see an error like `OSError: [Errno 98] Address already in use`, it means another application is already using port 5000. You'll need to stop that other application or configure `app.py` to use a different port (more advanced).
+*   If you see errors related to API keys, double-check your `.env` file.
+*   If there are connection errors to Gemini or Supabase, ensure your internet connection is active and the services are not down.
+
+### 2.5. Key Dependencies
+
+*   **Flask:** For creating the web server and API endpoints.
+*   **google-generativeai:** The official Google library to interact with the Gemini API.
+*   **supabase-client:** To interact with the Supabase database.
+*   **python-dotenv:** To load environment variables from the `.env` file.
+
+### 2.6. Relevant Files
+
+*   `.env`: Stores API keys. This is crucial.
+*   `requirements.txt`: Lists all Python packages needed for `app.py` (and `dashboard.py`).
+---
+
+## 3. VS Code Extension (`copilot-monitor/src/extension.ts`)
+
+### 3.1. Purpose
+
+The VS Code extension is the part of Copilot Monitor that lives inside your Visual Studio Code editor. Its main job is to:
+
+*   **Watch what you type:** It monitors changes in your code files.
+*   **Identify prompts and suggestions:** It tries to figure out when you've typed a prompt and when GitHub Copilot (or a similar tool) has provided a suggestion.
+*   **Send data for scoring:** Once it identifies a prompt and an accepted suggestion, it sends this information to the Flask backend (`app.py`) to be scored.
+*   **Show you the score:** It displays a notification in VS Code with the score received from the backend.
+*   **Log its actions:** It writes messages about what it's doing to a special "Output Channel" in VS Code.
+
+This extension is written in TypeScript, a language that builds on JavaScript and is commonly used for VS Code extensions.
+
+### 3.2. Core Logic (Rookie-Friendly Explanation)
+
+Let's look at the key parts of `copilot-monitor/src/extension.ts`:
+
+*   **Activation (`activate` function):**
+    *   This function is called automatically by VS Code when the extension starts up (e.g., when you open a workspace where the extension is enabled, or after you run it from the debugger).
+    *   `outputChannel = vscode.window.createOutputChannel("Copilot Monitor");` creates a dedicated panel in VS Code's "Output" view where the extension can print messages. This is super helpful for seeing what the extension is doing or for debugging.
+    *   It also registers a command `copilot-monitor.viewHistory` which currently just logs any stored history to this output channel.
+
+*   **`onDidChangeTextDocument` Event Handler (The Heart of the Extension):**
+    *   This is the most important part. `vscode.workspace.onDidChangeTextDocument(...)` tells VS Code: "Hey, whenever any text changes in any open document, please run this piece of code."
+    *   **Language Check:**
+        *   `if (!['python', 'typescript', 'javascript'].includes(doc.languageId)) { ... }`
+        *   The extension only cares about changes in Python, TypeScript, or JavaScript files. It ignores changes in other file types (like plain text, markdown, etc.).
+    *   **Change Detection:**
+        *   `const changes = event.contentChanges.map(c => c.text).join('').trim();`
+        *   This line figures out what text was actually added or changed.
+    *   **Heuristic for Prompt vs. Suggestion (Important!):**
+        *   The extension uses a simple rule (a "heuristic") to guess if a change was you typing (a prompt) or Copilot inserting a suggestion:
+            *   `if (changes.length < 20)`: If the text change is short (less than 20 characters), it's assumed to be part of what you are typing. This text is stored in `lastPrompt`.
+            *   `if (changes.length >= 20)`: If the text change is long (20 characters or more), it's assumed to be a code suggestion inserted by Copilot (or a similar AI assistant, or even a large paste by the user). This text is considered the `suggestion`.
+        *   This heuristic is not perfect but works for many common scenarios. For example, if you type `def my_func(` (a prompt, short) and Copilot suggests a whole function body (a suggestion, long).
+    *   **Sending Data to Backend (`app.py`):**
+        *   When a longer change (assumed to be a suggestion) is detected, the extension prepares a `payload` (a package of data):
+            ```typescript
+            const payload = {
+                prompt: lastPrompt, // The last short thing you typed
+                suggestion,        // The long thing Copilot suggested
+                lang: doc.languageId, // e.g., 'python'
+                file_path: doc.fileName, // e.g., 'C:\\Users\\YourName\\Documents\\project\\test.py'
+            };
+            ```
+        *   It then uses `axios.post('http://127.0.0.1:5000/score', payload)` to send this data to your running Flask backend. `axios` is a popular library for making web requests.
+        *   **`axios-retry`:** The code uses `axiosRetry(axios, { ... });`. This automatically makes `axios` try the request again a few times if it fails (e.g., if `app.py` is restarting or there's a momentary network blip). This makes the extension more robust.
+    *   **Displaying the Score:**
+        *   `const score = res.data.score;` gets the score from the backend's response.
+        *   `vscode.window.showInformationMessage(💡 Copilot Monitor Score: ${score}/10);` displays a little pop-up notification at the top of VS Code showing the score.
+    *   **Local History:**
+        *   `scoredSuggestionsHistory.push(entry);`
+        *   The extension keeps a short list (`MAX_STORED_SUGGESTIONS` = 20) of the most recent suggestions and their scores in memory. This isn't sent anywhere else by default but is available for the `viewHistory` command.
+
+*   **Logging (`log` and `logError` functions):**
+    *   These helper functions are used throughout the extension to print messages to both the system console (which you might see if you're running VS Code from a terminal) AND to the "Copilot Monitor" output channel within VS Code. This is good for debugging.
+
+*   **Deactivation (`deactivate` function):**
+    *   This function is called when the extension is shut down. It currently just logs a message.
+
+### 3.3. How to Build/Compile the Extension
+
+The extension is written in TypeScript (`.ts` files), but VS Code actually runs JavaScript (`.js` files). So, you need a "build" step to compile your TypeScript code into JavaScript.
+
+1.  **Navigate to the extension's directory** in your terminal:
+    ```bash
+    cd copilot-monitor
+    ```
+2.  **Install dependencies (if you haven't already):**
+    This downloads all the necessary tools and libraries defined in `package.json`.
+    ```bash
+    npm install
+    ```
+3.  **Compile the extension:**
+    This command runs the build process defined in `package.json` (which uses `esbuild` in this project).
+    ```bash
+    npm run compile
+    ```
+    This will create/update files in a `dist` folder (e.g., `copilot-monitor/dist/extension.js`). This `dist/extension.js` file is what VS Code actually loads.
+
+    *You typically need to run `npm run compile` after you make any changes to the `.ts` files if you want to test those changes.*
+
+### 3.4. How to Run the Extension
+
+You run the extension in a special "Extension Development Host" (EDH) window of VS Code. This keeps it separate from your main VS Code window where you're editing the extension's code.
+
+1.  **Ensure the Flask backend (`app.py`) is running** (see Section 2.3). The extension needs this to send data to.
+2.  **Open the `copilot-monitor` subfolder in VS Code.** Not the parent folder, but the actual `copilot-monitor` folder itself. This is important because VS Code looks for extension manifest files (`package.json`) in the root of the opened folder to know it's an extension project.
+3.  **Compile your latest changes:** If you've made code changes, run `npm run compile` in the terminal within the `copilot-monitor` folder.
+4.  **Start Debugging:**
+    *   Press `F5`.
+    *   Or, go to the "Run and Debug" view (the icon that looks like a play button with a bug on it on the left sidebar).
+    *   In the dropdown at the top, "Run Extension" should be selected. Click the green play button next to it.
+5.  A **new VS Code window will open**. This is the EDH. Your extension is now running inside this new window.
+
+### 3.5. How to Test (Manually)
+
+1.  **Make sure your Flask backend (`app.py`) is running.**
+2.  **Run the extension in the EDH** as described above.
+3.  **In the EDH window:**
+    *   Open or create a file of a supported language (Python, JavaScript, or TypeScript). For example, create `test.py`.
+    *   Start typing some code that would typically trigger GitHub Copilot. For example, in a Python file, type `def my_cool_function():` and press Enter.
+    *   Wait for Copilot to provide a suggestion.
+    *   **Accept the suggestion** (usually by pressing Tab).
+4.  **Observe the results:**
+    *   **VS Code Notification:** You should see a notification pop up: "💡 Copilot Monitor Score: X/10".
+    *   **"Copilot Monitor" Output Channel:**
+        *   In the EDH window, go to View -> Output.
+        *   In the dropdown on the right of the Output panel, select "Copilot Monitor".
+        *   You should see log messages detailing what the extension did, including the prompt it detected, the suggestion, the payload sent, and the response from the backend. E.g.:
+            ```
+            [CM] onDidChangeTextDocument triggered
+            [CM] Changes detected: "def my_cool_function():"
+            [CM] Identified as prompt. lastPrompt set to: "def my_cool_function():"
+            ... (later, when suggestion is accepted) ...
+            [CM] Changes detected: " # Full function body suggested by Copilot..."
+            [CM] Identified as suggestion: " # Full function body suggested by Copilot..."
+            [CM] Current lastPrompt: "def my_cool_function():"
+            [CM] Sending to backend. Payload: { ... }
+            [CM] Backend response received: { score: X }
+            [CM] Stored suggestion. History size: Y
+            ```
+    *   **Flask Backend (`app.py`) Console:** Check the terminal where `app.py` is running. You should see logs indicating it received the request from the extension, processed it, and contacted Gemini/Supabase.
+    *   **Supabase Data:** Log into your Supabase dashboard and check the `prompt_log` table for a new entry.
+    *   **Dashboard (`dashboard.py`):** If you run the dashboard, the new data should eventually appear there.
+
+**Troubleshooting:**
+*   **No notification / No logs in Output Channel:**
+    *   Is the extension running in the EDH?
+    *   Did you open a supported file type (py, ts, js)?
+    *   Is Copilot (or your AI assistant) enabled and providing suggestions?
+    *   Did you accept the suggestion?
+    *   Check the "Developer Tools" console in the EDH (Help -> Toggle Developer Tools -> Console tab) for any errors from the extension itself.
+*   **Error notification (e.g., "API Error"):**
+    *   Check the "Copilot Monitor" output channel for more detailed error messages.
+    *   Is `app.py` running and accessible at `http://127.0.0.1:5000`?
+    *   Are there errors in the `app.py` console?
+
+### 3.6. Key Dependencies (for the extension code)
+
+*   **`vscode` API:** This is the fundamental library provided by VS Code itself, allowing the extension to interact with the editor (e.g., listen to text changes, show notifications).
+*   **`axios`:** Used for making HTTP requests to the Flask backend.
+*   **`axios-retry`:** A wrapper around `axios` that adds automatic retrying of failed requests.
+
+### 3.7. Relevant Files (for the extension)
+
+*   **`copilot-monitor/src/extension.ts`:** The main TypeScript source code for the extension.
+*   **`copilot-monitor/package.json`:** The "manifest" file for the extension. It tells VS Code about the extension (name, version, etc.), lists its dependencies (`npm install` uses this), and defines scripts like `compile` and `test`.
+*   **`copilot-monitor/tsconfig.json`:** Configuration file for the TypeScript compiler. Tells the compiler how to translate `.ts` files to `.js`.
+*   **`copilot-monitor/esbuild.js`:** A script used by `npm run compile` to bundle the TypeScript code into efficient JavaScript for the extension.
+*   **`copilot-monitor/dist/extension.js`:** The compiled JavaScript output that VS Code actually runs (this is generated by `npm run compile`).
+---
+
+## 4. Streamlit Dashboard (`dashboard.py`)
+
+### 4.1. Purpose
+
+The `dashboard.py` file is responsible for creating a web-based dashboard where you can see and analyze the data collected by the Copilot Monitor. It uses the Streamlit library, which makes it easy to build interactive data applications in Python.
+
+The dashboard connects to your Supabase database, fetches the logged prompt and suggestion data, and then displays it in various charts and tables. This helps you understand:
+
+*   Average scores for suggestions.
+*   How often Copilot is being used (based on logged suggestions).
+*   Trends in prompt and suggestion lengths.
+*   Which suggestions are marked as "accepted".
+
+### 4.2. Core Logic (Rookie-Friendly Explanation)
+
+Here's how `dashboard.py` works:
+
+*   **Streamlit Basics:**
+    *   Streamlit is a Python library that turns Python scripts into shareable web apps. You write regular Python code, and Streamlit handles the web server and UI components.
+    *   Commands like `st.title()`, `st.write()`, `st.dataframe()`, `st.line_chart()`, `st.metric()`, and `st.bar_chart()` are used to create the visual elements of the dashboard.
+
+*   **Environment Variables:**
+    *   Just like `app.py`, the dashboard uses `load_dotenv()` and `os.environ.get(...)` to load your Supabase credentials (`SUPABASE_CME_URL` and `SUPABASE_CME_KEY`) from the `.env` file. This is needed to connect to the database.
+
+*   **Supabase Connection (`init_supabase_client` function):**
+    *   This function is responsible for creating the Supabase client object, which allows the dashboard to communicate with your database.
+    *   `@st.cache_resource`: This is a Streamlit "decorator" that tells Streamlit to be smart about this function. It means the Supabase client will be created once and then reused for subsequent user sessions or page reloads, rather than re-establishing the connection every single time, which is more efficient.
+
+*   **Fetching Data from Supabase (`fetch_prompt_logs` function):**
+    *   This function queries the `prompt_log` table in your Supabase database to get all the stored data.
+    *   `_client.table("prompt_log").select("*").order("created_at", desc=True).execute()`: This is the actual query. It selects all columns (`*`) from the `prompt_log` table and orders the results by the `created_at` timestamp, with the newest entries first.
+    *   **Data Caching (`@st.cache_data(ttl=600)`):**
+        *   This is another Streamlit decorator. It tells Streamlit to cache the *data* returned by this function for a certain amount of time (`ttl=600` means 600 seconds, or 10 minutes).
+        *   If multiple users view the dashboard, or if you refresh the page within 10 minutes, Streamlit will use the saved (cached) data instead of asking Supabase for it again. This makes the dashboard load faster and reduces the load on your Supabase database.
+    *   **Data Preparation (Pandas DataFrame):**
+        *   The data from Supabase is converted into a Pandas DataFrame (`df = pd.DataFrame(response.data)`). Pandas is a powerful Python library for working with tabular data.
+        *   It then does some minor data cleaning and transformation:
+            *   Converts the `created_at` column to proper datetime objects.
+            *   Ensures `score` is a number and `accepted` is a boolean (True/False).
+            *   Creates new columns `date` (just the date part of `created_at`) and `hour` (just the hour part) for easier grouping in charts.
+
+*   **Displaying Metrics and UI Layout:**
+    *   `st.set_page_config(layout="wide", page_title="Copilot Monitor Dashboard")`: Sets the overall page layout to use the full width and sets the browser tab title.
+    *   `st.sidebar`: Currently has a placeholder for filters.
+    *   `st.title("Copilot Monitor Dashboard")`: Sets the main title of the page.
+    *   **Raw Data Expander:** `with st.expander("View Raw Prompt Logs")`: Creates a collapsible section where you can view the raw data table if you want to inspect it directly.
+    *   **Metrics Overview:**
+        *   **Average Score per File/Language:**
+            *   `df_logs.groupby(['file_path', 'lang'])['score'].mean()`: This uses Pandas to group the data by file path and language, then calculates the average score for each group.
+            *   `st.dataframe(avg_scores, use_container_width=True)`: Displays this summary table.
+        *   **Copilot Usage Timeline (Suggestions per Day):**
+            *   `df_logs.groupby('date').size()`: Groups data by the `date` and counts how many suggestions were logged each day.
+            *   `st.line_chart(usage_timeline)`: Displays this information as a line chart.
+        *   **Prompt & Suggestion Analysis:**
+            *   Calculates the average length (number of characters) of prompts and suggestions.
+            *   `st.metric(label="Average Prompt Length (chars)", value=...)`: Displays these as "metrics" (big numbers with labels).
+            *   `df_logs['accepted'].value_counts()`: Counts how many suggestions were marked `True` (accepted) versus `False` (not accepted).
+            *   `st.bar_chart(accepted_counts)`: Shows this as a bar chart.
+            *   Also displays these counts using `st.metric`.
+
+*   **Error Handling:**
+    *   The code includes `try-except` blocks to catch potential errors during Supabase initialization or data fetching and displays error messages on the dashboard (e.g., if `.env` variables are missing or Supabase is unreachable).
+
+### 4.3. How to Run `dashboard.py`
+
+1.  **Ensure your `.env` file is correctly set up** in the project root directory with your Supabase URL and Key. The dashboard needs these to fetch data.
+2.  **Make sure you have installed the Python dependencies** (`pip install -r requirements.txt`), especially `streamlit` and `pandas`.
+3.  Open your terminal or command prompt.
+4.  Navigate to the project root directory (where `dashboard.py` is located).
+5.  Run the following command:
+    ```bash
+    streamlit run dashboard.py
+    ```
+6.  Streamlit will start a local web server and usually automatically open the dashboard in your default web browser. You'll also see output in your terminal like:
+    ```
+    You can now view your Streamlit app in your browser.
+
+    Local URL: http://localhost:8501
+    Network URL: http://<your_local_ip>:8501
+    ```
+    You can open the "Local URL" (usually `http://localhost:8501`) in your browser if it doesn't open automatically.
+
+### 4.4. How to Test (Manually)
+
+1.  **Generate some data:**
+    *   Make sure `app.py` (Flask backend) is running.
+    *   Run the VS Code extension and use Copilot to generate and accept several suggestions in different files or languages (Python, JS, TS). This will populate your Supabase `prompt_log` table.
+2.  **Run the dashboard** as described in section 4.3.
+3.  **Open the dashboard URL** in your web browser.
+4.  **Verify the displayed data:**
+    *   Does the "Raw Prompt Logs" expander show the data you expect (the suggestions you just generated)?
+    *   Are the "Average Score per File/Language" calculations sensible?
+    *   Does the "Copilot Usage Timeline" reflect recent activity?
+    *   Are the "Prompt & Suggestion Analysis" metrics (lengths, accepted counts) being displayed?
+    *   Refresh the page. Does it load quickly (testing the cache)?
+    *   After 10 minutes (or if you restart the streamlit app), generate more data via the VS Code extension and then refresh the dashboard. Does it update with the new data (testing cache expiry and re-fetch)?
+
+**Troubleshooting:**
+*   **Dashboard shows "No data available" or errors related to Supabase:**
+    *   Double-check your `SUPABASE_CME_URL` and `SUPABASE_CME_KEY` in the `.env` file.
+    *   Ensure there's actually data in your `prompt_log` table in Supabase.
+    *   Check the terminal where you ran `streamlit run dashboard.py` for any error messages.
+*   **Charts are empty or look wrong:**
+    *   Verify the data types in your Supabase table (e.g., `score` should be a number).
+    *   Ensure enough varied data has been logged to make the charts meaningful.
+
+### 4.5. Key Dependencies
+
+*   **streamlit:** The core library for building the web application.
+*   **pandas:** Used for data manipulation and creating DataFrames, which Streamlit often uses for charts and tables.
+*   **supabase-client:** To connect to and fetch data from Supabase.
+*   **python-dotenv:** To load environment variables from the `.env` file.
+
+### 4.6. Relevant Files
+
+*   `.env`: Stores Supabase credentials. Crucial for the dashboard to function.
+*   `requirements.txt`: Lists `streamlit`, `pandas`, and other Python packages.
+---
+
+## 5. Supabase (The Database)
+
+### 5.1. Purpose and Role
+
+In the Copilot Monitor project, Supabase serves as the **central cloud database**. Think of it as a highly organized filing cabinet on the internet where all the information about your Copilot prompts, suggestions, and their scores is stored.
+
+Its key roles are:
+
+*   **Data Persistence:** It saves the data long-term. Without Supabase, all information would be lost when you close the Flask backend or the VS Code extension.
+*   **Central Repository:** Both the Flask backend (`app.py`) and the Streamlit dashboard (`dashboard.py`) interact with Supabase:
+    *   `app.py` **writes** data to Supabase (after a suggestion is scored by Gemini).
+    *   `dashboard.py` **reads** data from Supabase to display analytics.
+*   **Scalability and Accessibility:** Being a cloud service, Supabase can handle a growing amount of data and can be accessed from anywhere (with the right credentials).
+
+Supabase is more than just a PostgreSQL database; it provides a suite of tools including authentication, storage, and auto-generated APIs, though this project primarily uses its database capabilities.
+
+### 5.2. The `prompt_log` Table
+
+The primary place where data is stored within your Supabase project is a table named `prompt_log`. When you set up Supabase, you'll need to create this table. Here are its important columns and what they mean:
+
+*   `id` (integer, primary key): A unique number for each record, automatically generated.
+*   `created_at` (timestamp with time zone): Automatically records when the entry was added.
+*   `prompt` (text): The code or text the user typed before Copilot offered a suggestion.
+    *   *Example:* `def calculate_sum(a, b):`
+*   `suggestion` (text): The code suggestion provided by Copilot (or similar AI assistant).
+    *   *Example:* `  return a + b`
+*   `score` (integer): The score (from 0 to 10) given by the Gemini AI, representing the quality of the suggestion.
+    *   *Example:* `8`
+*   `lang` (text): The programming language of the file where the suggestion occurred.
+    *   *Example:* `python`, `typescript`, `javascript`
+*   `file_path` (text): The full path to the file in which the prompt and suggestion occurred.
+    *   *Example:* `/Users/jules/projects/my_project/utils.py` or `C:\\Users\\Jules\\Documents\\my_project\\utils.js`
+*   `accepted` (boolean): A true/false value. In `app.py`, this is currently set to `true` if the `score` is 6 or higher, and `false` otherwise. It's a simple heuristic to guess if the suggestion was considered "good".
+    *   *Example:* `true`
+
+You would typically create this table through the Supabase web interface (Dashboard -> Table Editor -> Create a new table).
+
+### 5.3. How to Interact with Supabase (as a Developer)
+
+While the applications (`app.py`, `dashboard.py`) interact with Supabase programmatically using API keys, as a developer setting up or debugging the project, you'll mainly use the **Supabase web dashboard**:
+
+1.  **Sign up/Log in:** Go to [supabase.com](https://supabase.com) and log into your account.
+2.  **Select your Project:** Open the project you've dedicated to Copilot Monitor.
+3.  **Table Editor:**
+    *   On the left sidebar, click on the "Table Editor" icon (looks like a grid).
+    *   Here you can see your tables (e.g., `prompt_log`).
+    *   You can click on a table name to view its data, add new rows manually (for testing), edit existing rows, or delete rows.
+    *   This is where you would initially create the `prompt_log` table and define its columns as described above.
+4.  **SQL Editor:**
+    *   On the left sidebar, click on the "SQL Editor" icon (looks like `</>`).
+    *   Here you can write and run custom SQL queries if you need to inspect data in more complex ways or perform bulk operations.
+5.  **Project Settings (API Keys):**
+    *   Click on the "Project Settings" icon (gear icon) at the bottom of the left sidebar.
+    *   Go to the "API" section.
+    *   Here you'll find your `Project URL` (used as `SUPABASE_CME_URL` in `.env`) and `Project API Keys` (specifically the `service_role` key, used as `SUPABASE_CME_KEY` in `.env`). **Remember to keep your `service_role` key secret!**
+
+### 5.4. Testing and Verification
+
+*   **Data Logging:** The primary way to test Supabase's role is to run the VS Code extension and `app.py`, generate a suggestion, and then check the `prompt_log` table in the Supabase dashboard to see if a new row with the correct data has been added.
+*   **Data Retrieval:** Run `dashboard.py` and verify that it displays data. This confirms that the dashboard can correctly read from Supabase.
+*   **Manual Edits (for debugging):** If the dashboard isn't showing something you expect, you can look directly at the data in the Table Editor to see what `app.py` actually stored. You could even manually insert a test row to see how the dashboard displays it.
+
+Supabase is a critical, though somewhat invisible, part of the system that makes the whole logging and analytics process possible.
+---
+
+## 6. Empty/Placeholder Files (`scorer.py`, `supabase_writer.py`)
+
+During your exploration of the codebase, you might come across files named `scorer.py` and `supabase_writer.py` in the project root directory.
+
+As of the current project structure:
+
+*   **`scorer.py`**: This file is empty.
+*   **`supabase_writer.py`**: This file is also empty.
+
+**Purpose (Likely Intended or Legacy):**
+
+It's common in software development for files to be created as placeholders for future functionality or as remnants of previous design ideas that were later implemented differently.
+
+*   `scorer.py` might have been initially intended to house the Gemini scoring logic, which was ultimately integrated directly into `app.py` within the `score_prompt` function.
+*   `supabase_writer.py` could have been planned as a dedicated module for all Supabase write operations, but this logic was also incorporated directly into `app.py` after the score is received.
+
+**Current Status:**
+
+Currently, these files **do not contain any functional code** and are **not used** by any other part of the Copilot Monitor system (`app.py`, `extension.ts`, or `dashboard.py`).
+
+**Recommendation for a Rookie Developer:**
+
+*   **You can generally ignore these files.** They don't impact how the system works.
+*   There's no need to run, test, or understand them in detail for the current functionality.
+*   If you are cleaning up the project or refactoring, these files could be candidates for removal, assuming no future plans explicitly require them. However, it's always good to double-check with project maintainers if you're unsure about deleting files.
+
+For now, focus your learning on `app.py`, `copilot-monitor/src/extension.ts`, and `dashboard.py` as these are the active components.
+---
+
+## 7. End-to-End Testing and Data Flow
+
+Understanding how all the pieces of Copilot Monitor fit together is crucial. End-to-end (E2E) testing involves running the entire system and verifying that data flows correctly from start to finish.
+
+### 7.1. Data Flow Overview
+
+Here's a simplified view of how data moves through the system:
+
+1.  **User Action (VS Code):**
+    *   You type some code (this becomes the `prompt`).
+    *   GitHub Copilot (or a similar AI assistant) suggests a block of code.
+    *   You accept the suggestion (e.g., by pressing Tab).
+
+2.  **VS Code Extension (`copilot-monitor/src/extension.ts`):**
+    *   Detects the accepted suggestion (based on its length heuristic).
+    *   Packages the `prompt`, `suggestion`, current `language`, and `file_path`.
+    *   Sends this package as an HTTP POST request to the Flask Backend (`http://127.0.0.1:5000/score`).
+
+3.  **Flask Backend (`app.py`):**
+    *   Receives the data from the VS Code extension.
+    *   Constructs a query for the Gemini API, including the `prompt` and `suggestion`.
+    *   Sends this query to the Google Gemini API.
+
+4.  **Gemini API:**
+    *   Processes the query.
+    *   Returns a textual response that includes a quality score (1-10) for the suggestion.
+
+5.  **Flask Backend (`app.py`) again:**
+    *   Parses the score from Gemini's response.
+    *   Prepares a record including the original `prompt`, `suggestion`, the parsed `score`, `language`, `file_path`, an `accepted` status (true if score >= 6), and the current `timestamp`.
+    *   Inserts this record into the `prompt_log` table in your Supabase database.
+    *   Sends a response back to the VS Code extension containing just the score.
+
+6.  **VS Code Extension (`copilot-monitor/src/extension.ts`) again:**
+    *   Receives the score from the Flask backend.
+    *   Displays an informational message in VS Code (e.g., "💡 Copilot Monitor Score: 8/10").
+    *   Logs details to its Output Channel.
+
+7.  **Streamlit Dashboard (`dashboard.py`):**
+    *   When you run or refresh the dashboard:
+    *   It queries the `prompt_log` table in Supabase.
+    *   Fetches all the logged data.
+    *   Processes and visualizes this data (charts, tables, metrics).
+
+**Simplified Diagram:**
+
+```
+[VS Code User] ---types/accepts---> [VS Code Extension] ---HTTP POST (prompt, suggestion)---> [Flask Backend (app.py)]
+                                                                                                    |
+                                                                                                    |---Gemini API Call (prompt, suggestion)---> [Google Gemini API]
+                                                                                                    |                                                 |
+                                                                                                    |---Gemini Response (text with score)----------<|
+                                                                                                    |
+                                                                                                    |---Log to Supabase (prompt, suggestion, score, etc.)---> [Supabase DB (prompt_log table)]
+                                                                                                    |
+                                     [VS Code Extension] <---HTTP Response (score)------------------|
+      (displays score notification)
+
+[Streamlit Dashboard (dashboard.py)] ---Reads data from---> [Supabase DB (prompt_log table)]
+      (displays analytics)
+```
+
+### 7.2. How to Perform End-to-End Testing
+
+This will test all major components working together.
+
+**Prerequisites:**
+*   All setup steps from Section 1.2 are complete (cloned repo, `.env` file configured, dependencies installed).
+*   You have created the `prompt_log` table in your Supabase project as described in Section 5.2.
+
+**Steps:**
+
+1.  **Start the Flask Backend (`app.py`):**
+    *   Open a terminal.
+    *   Navigate to the project root directory.
+    *   Run: `python app.py`
+    *   Keep this terminal open. Look for output indicating it's running on `http://127.0.0.1:5000/`.
+
+2.  **Build and Run the VS Code Extension:**
+    *   If you've made changes to `extension.ts`, open a new terminal in the `copilot-monitor` sub-directory.
+    *   Run: `npm run compile`
+    *   In VS Code, open the `copilot-monitor` folder.
+    *   Press `F5` (or "Run and Debug" -> "Run Extension"). This will open a new VS Code window (the Extension Development Host - EDH).
+
+3.  **Generate and Accept a Suggestion in the EDH:**
+    *   In the EDH window, open or create a supported file type (e.g., `test.py`, `script.js`, `main.ts`).
+    *   Type some code to trigger a Copilot suggestion (e.g., a function definition like `def hello_world():`).
+    *   When Copilot provides a suggestion, **accept it** (usually by pressing `Tab`).
+
+4.  **Observe and Verify:**
+
+    *   **VS Code (EDH):**
+        *   You should see an informational pop-up: `💡 Copilot Monitor Score: X/10`.
+        *   Open the Output panel (View -> Output) and select "Copilot Monitor" from the dropdown. You should see detailed logs from the extension about the prompt, suggestion, and backend communication.
+    *   **Flask Backend Console (Terminal where `app.py` is running):**
+        *   You should see logs indicating:
+            *   Receipt of a POST request to `/score`.
+            *   The data received (prompt, suggestion).
+            *   The raw response from Gemini.
+            *   The parsed score.
+            *   Attempts and success/failure of logging to Supabase.
+    *   **Supabase Dashboard:**
+        *   Log in to your Supabase project online.
+        *   Go to the "Table Editor" and select your `prompt_log` table.
+        *   A new row should have appeared with the data from the suggestion you just accepted (prompt, suggestion, score, lang, file_path, accepted status, timestamp). Verify these details.
+    *   **Start the Streamlit Dashboard (`dashboard.py`):**
+        *   Open another terminal (or reuse one if available, but keep `app.py` running).
+        *   Navigate to the project root directory.
+        *   Run: `streamlit run dashboard.py`
+        *   Open the provided local URL (e.g., `http://localhost:8501`) in your browser.
+    *   **Streamlit Dashboard (Browser):**
+        *   The dashboard should now reflect the new data point. Check:
+            *   The raw data table (if you expand it).
+            *   The "Average Score per File/Language".
+            *   The "Copilot Usage Timeline".
+            *   "Prompt & Suggestion Analysis" metrics.
+
+5.  **Repeat:** Try generating suggestions in different files, different languages (if you set them up), or with different types of prompts to see how the system handles them and how the dashboard updates.
+
+**Troubleshooting E2E Issues:**
+
+*   **No notification in VS Code / No logs in extension:**
+    *   Is `app.py` running? If not, the extension can't send data.
+    *   Did the extension compile correctly?
+    *   Is the heuristic for prompt/suggestion (length < 20 vs >= 20) working as expected for your test case? Check extension logs.
+*   **Errors in `app.py` console:**
+    *   **Gemini API errors:** Check your `GOOGLE_API_KEY` in `.env`. Is the Gemini API enabled for your project?
+    *   **Supabase errors:** Check `SUPABASE_CME_URL` and `SUPABASE_CME_KEY` in `.env`. Is the `prompt_log` table created with the correct columns? Is your internet connection okay?
+*   **Data not appearing in Supabase:**
+    *   Check `app.py` logs for errors during the Supabase insert operation.
+*   **Dashboard not showing new data:**
+    *   Is Supabase being updated correctly? (Check Supabase dashboard first).
+    *   Are there any errors in the terminal where `streamlit run dashboard.py` is running?
+    *   Try a hard refresh in your browser (Ctrl+Shift+R or Cmd+Shift+R) to bypass browser cache.
+    *   Remember Streamlit caches data for 10 minutes (`@st.cache_data(ttl=600)` in `dashboard.py`). Wait or restart the Streamlit app to force a fresh data fetch if needed for immediate testing.
+
+By following these E2E testing steps, you can gain confidence that all parts of the Copilot Monitor are communicating and functioning as designed.
+---
